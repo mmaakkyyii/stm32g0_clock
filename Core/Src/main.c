@@ -486,6 +486,7 @@ void Setting(){
 	set_week(week,setting_day);
 	sprintf(s,"%4d/%2d/%2d(%s)*",2000+setting_year,setting_month,setting_date,week);
 	print(s,1);
+	HAL_Delay(500);
 
 
 	int setting_flag=1;
@@ -612,7 +613,7 @@ void Setting(){
 							break;
 					//enter
 					case 15:
-						setRTC(setting_sec, setting_min, setting_hour, setting_day, setting_date, setting_month, setting_year);
+						setRTC(setting_sec, setting_min, setting_hour, setting_day, setting_date, setting_month, 2000+setting_year);
 						print("setting         ",0);
 						print("clock           ",1);
 						for(int i=0;i<500;i++){
@@ -700,6 +701,17 @@ void Setting(){
 						if(setting_day>1)setting_day-=1;
 							else setting_day=7;
 							break;
+					//enter
+					case 15:
+						print("setting         ",0);
+						print("cancel          ",1);
+						for(int i=0;i<500;i++){
+							gesture();
+							HAL_Delay(1);
+						}
+						state=clock;
+						return;
+
 					default:
 						break;
 					}
