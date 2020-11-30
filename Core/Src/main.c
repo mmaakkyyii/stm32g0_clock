@@ -57,6 +57,13 @@ static void MX_I2C2_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+enum State{
+	clock,
+	setting
+};
+
+enum State state;
+
 uint8_t disp_addr=0x7c;
 int writedata(uint8_t rw,uint8_t data){
 	uint8_t buf[]={rw,data};
@@ -66,7 +73,7 @@ int writedata(uint8_t rw,uint8_t data){
 }
 
 void initdisplay(){
-	  HAL_Delay(50);
+	HAL_Delay(50);
 
 	writedata(0x00,0x38);
 	writedata(0x00,0x39);
@@ -93,50 +100,13 @@ void printkawaii(){
 void print(const char *p,int col){
 	if(col==0)  writedata(0x00,0x80);
 	if(col==1)  writedata(0x00,0x80+0x40);
+	if(col==2)  writedata(0x00,0x80+17);
 
 	for(;*p;p++){
 		writedata(0x40,*p);
 	}
 
 }
-
-int SERIAL_STRING;
-unsigned char DATA_U,DATA_D,DATA_L,DATA_R;
-unsigned char OLD_U,OLD_D,OLD_L,OLD_R;
-unsigned char work;
-unsigned char U_PEAK_END_FLAG,D_PEAK_END_FLAG,L_PEAK_END_FLAG,R_PEAK_END_FLAG;
-unsigned char STATUS_UD,STATUS_LR;
-unsigned char OLD_STATUS_UD,OLD_STATUS_LR;
-unsigned char DISP_FLAG;
-unsigned char NOISE_LEVEL = 2;
-unsigned char DECIDE_FLAG;
-unsigned int  PHASE_COUNTER;
-unsigned int  U_PEAK,D_PEAK,L_PEAK,R_PEAK;
-
-void RESET_VARIABLE(void)
-{
-  PHASE_COUNTER = 0;
-  U_PEAK=0;
-  D_PEAK=0;
-  L_PEAK=0;
-  R_PEAK=0;
-  OLD_U = 0;
-  OLD_D = 0;
-  OLD_L = 0;
-  OLD_R = 0;
-  U_PEAK_END_FLAG = 0;
-  D_PEAK_END_FLAG = 0;
-  L_PEAK_END_FLAG = 0;
-  R_PEAK_END_FLAG = 0;
-  STATUS_UD = 0;
-  STATUS_LR = 0;
-  OLD_STATUS_UD = 0;
-  OLD_STATUS_LR = 0;
-  SERIAL_STRING = 0;
-  DISP_FLAG = 0;
-  DECIDE_FLAG = 0;
-}
-
 
 int read_APDS9960(int addr){
 	uint8_t buff[1]={0};
@@ -181,6 +151,82 @@ int write_RTC(int addr,int data){
 	return ret;
 }
 
+void initRTC(){
+	write_RTC(0x00,read_RTC(0x00)&0b01111111);//clear CH bit
+}
+void set_week(char* week,int day){
+	week[3]='\0';
+	switch(day){
+	case 1:
+		week[0]='S';
+		week[1]='u';
+		week[2]='n';
+		break;
+	case 2:
+		week[0]='M';
+		week[1]='o';
+		week[2]='n';
+		break;
+	case 3:
+		week[0]='T';
+		week[1]='u';
+		week[2]='e';
+		break;
+	case 4:
+		week[0]='W';
+		week[1]='e';
+		week[2]='d';
+		break;
+	case 5:
+		week[0]='T';
+		week[1]='h';
+		week[2]='u';
+		break;
+	case 6:
+		week[0]='F';
+		week[1]='r';
+		week[2]='i';
+		break;
+	case 7:
+		week[0]='S';
+		week[1]='a';
+		week[2]='t';
+		break;
+	default:
+		week[0]=' ';
+		week[1]=' ';
+		week[2]=' ';
+	}
+
+}
+int get_sec(){
+	int sec_addr=read_RTC(0x00);
+	return ((sec_addr&0b01111111)>>4)*10+(sec_addr&0b1111);
+}
+int get_min(){
+	int min_addr=read_RTC(0x01);
+	return ((min_addr&0b01111111)>>4)*10+(min_addr&0b1111);
+}
+int get_hour(){
+	int hour_addr=read_RTC(0x02);
+	return ((hour_addr&0b0111111)>>4)*10+(hour_addr&0b1111);
+}
+int get_day(){
+	return read_RTC(0x03);
+}
+int get_date(){
+	int date_addr=read_RTC(0x04);
+	return (date_addr>>4)*10+(date_addr&0b1111);
+}
+int get_month(){
+	int month_addr=read_RTC(0x05);
+	return (month_addr>>4)*10+(month_addr&0b1111);
+}
+int get_year(){
+	int year_addr=read_RTC(0x06);
+	return (year_addr>>4)*10+(year_addr&0b1111)+2000;
+}
+
 void setRTC(int sec,int min,int hour,int day,int date, int month, int year){
 	  write_RTC(0x00,(sec/10)<<4 | (sec%10));
 	  write_RTC(0x01,(min/10)<<4 | (min%10));
@@ -191,80 +237,495 @@ void setRTC(int sec,int min,int hour,int day,int date, int month, int year){
 	  write_RTC(0x06,((year-2000)/10)<<4 | ((year-2000)%10));
 }
 
-void DATA_SYORI(void)
-{
-  if (DATA_U > OLD_U)                //IF NEW_DATA > OLD_DATA_BUFFER(APROACH TO PEAK)
-  {
-    OLD_U = DATA_U;                  //SAVE NEW_DATA TO OLD_DATA_BUFFER
-    U_PEAK = PHASE_COUNTER;          //PEAK_PHASE RENEWAL
-    U_PEAK_END_FLAG = 0;             //STILL PEAK or APROACH TO PEAK
-  }
-  else
-  {
-    U_PEAK_END_FLAG = 1;             //PEAK WAS GONE
-  }
-  //**************************
-  if (DATA_D > OLD_D)
-  {
-    OLD_D = DATA_D;
-    D_PEAK = PHASE_COUNTER;
-    D_PEAK_END_FLAG = 0;
-  }
-  else
-  {
-    D_PEAK_END_FLAG = 1;
-  }
-  //**************************
-  if (DATA_L > OLD_L)
-  {
-    OLD_L = DATA_L;
-    L_PEAK = PHASE_COUNTER;
-    L_PEAK_END_FLAG = 0;
-  }
-  else
-  {
-    L_PEAK_END_FLAG = 1;
-  }
-  //*************************
-  if (DATA_R > OLD_R)
-  {
-    OLD_R = DATA_R;
-    R_PEAK = PHASE_COUNTER;
-    R_PEAK_END_FLAG = 0;
-  }
-  else
-  {
-    R_PEAK_END_FLAG = 1;
-  }
-  //**************************
-  if(U_PEAK_END_FLAG && D_PEAK_END_FLAG && L_PEAK_END_FLAG && R_PEAK_END_FLAG) //IF ALL PEAK WAS GONE
-  {
-    DECIDE_FLAG = 0;
-    if ((U_PEAK > D_PEAK) & (U_PEAK >= L_PEAK) & (U_PEAK >= R_PEAK))           //U_PEAK WAS LAST
-    {
-      SERIAL_STRING = 1;
-      DECIDE_FLAG = 1;
-    }
-    if ((D_PEAK > U_PEAK) & (D_PEAK >= L_PEAK) & (D_PEAK >= R_PEAK))           //D_PEAK WAS LAST
-    {
-      SERIAL_STRING = 2;
-      DECIDE_FLAG = 1;
-    }
-    if ((L_PEAK >= U_PEAK) & (L_PEAK >= D_PEAK) & (L_PEAK > R_PEAK))           //L_PEAK WAS LAST
-    {
-      SERIAL_STRING = 3;
-      DECIDE_FLAG =1;
-    }
-    if ((R_PEAK >= U_PEAK) & (R_PEAK >= D_PEAK) & (R_PEAK > L_PEAK))           //R_PEAK WAS LAST
-    {
-      SERIAL_STRING = 4;
-      DECIDE_FLAG = 1;
-    }
-    if (!DECIDE_FLAG)SERIAL_STRING = 0;                                   //CAN'T DECIDE
- }
+enum Dir{
+	non,
+	left,
+	right,
+	up,
+	down,
+	near,
+	far
+};
+
+void initAPDS9960(){
+	//uint8_t whoami=read_APDS9960(0x92);
+
+	write_APDS9960(0x80,0b01000101);//POWER ON<0>, GESTURE ENABLE<6>, PROXIMITY DETECT ENALBE<2>,AEN=0
+	write_APDS9960(0x90,0b00110000);//Gesture LED Drive Strength 300%(max)
+	write_APDS9960(0xA3,0b01100100);//Reserve0, Gain x8(11), LED Drive 100mA(00), Wait Time see under number
+									  //111=39.2mS 110=30.8mS 101=22.4mS 100=14.0mS 011=8.4mS 010=5.6mS 001=2.8ms 000=0mS
+
+	write_APDS9960(0xA4,(char)(90));//U MINUS OFFSET
+	write_APDS9960(0xA5,(char)(80)); //D MINUS OFFSET
+	write_APDS9960(0xA7,0);//L MINUS OFFSET
+	write_APDS9960(0xA9,0);//R MINUS OFFSET
+
+	write_APDS9960(0xAB,0b00000001);//GIEN off<1>(INTERRUPT DISABLE), GMODE ON<0>
 }
 
+int gesture(){
+	const int gesture_thr=50;
+	const int GESTURE_SENSITIVITY_1=50;
+	const int GESTURE_SENSITIVITY_2=50;
 
+	char gstatus=read_APDS9960(0xAF);//GSTATUS
+	if((gstatus&0x01) !=1)return -1;
+
+	char fifo_level = read_APDS9960(0xAE);  //READ GESTUR FIFO LEVEL REGISTER
+	char DATA_U[32];
+	char DATA_D[32];
+	char DATA_L[32];
+	char DATA_R[32];
+	char u_first=1;
+	char d_first=1;
+	char l_first=1;
+	char r_first=1;
+	char u_last=1;
+	char d_last=1;
+	char l_last=1;
+	char r_last=1;
+
+	int ud_ratio_first;
+	int lr_ratio_first;
+	int ud_ratio_last;
+	int lr_ratio_last;
+	int ud_delta;
+	int lr_delta;
+
+    int gesture_ud_delta_ = 0;
+    int gesture_lr_delta_ = 0;
+    int gesture_ud_count_ = 0;
+    int gesture_lr_count_ = 0;
+    int gesture_near_count_ = 0;
+    int gesture_far_count_ = 0;
+    int gesture_state = 0;
+
+
+	if(fifo_level > 0)           //IF FIFO HAS SOME DATA
+	{
+		for(int i=0;i<fifo_level;i++){
+			DATA_U[i] = read_APDS9960(0xFC);
+			DATA_D[i] = read_APDS9960(0xFD);
+			DATA_L[i] = read_APDS9960(0xFE);
+			DATA_R[i] = read_APDS9960(0xFF);
+		}
+
+		for(int i=0;i<fifo_level;i++){
+			if( (DATA_U[i]>gesture_thr) &&
+				(DATA_U[i]>gesture_thr) ||
+				(DATA_U[i]>gesture_thr) &&
+				(DATA_U[i]>gesture_thr)	){
+
+				u_first=DATA_U[i];
+				d_first=DATA_D[i];
+				l_first=DATA_L[i];
+				r_first=DATA_R[i];
+				break;
+			}
+		}
+		//char s[16];
+		//sprintf(s,"%d|%3d:%3d:%3d:%3d",gesture_state,DATA_U[0],DATA_D[0],DATA_L[0],DATA_R[0]);
+		//print(s,2);
+
+		for(int i=fifo_level;i>=0;i--){
+			if( (DATA_U[i]>gesture_thr) &&
+				(DATA_U[i]>gesture_thr) ||
+				(DATA_U[i]>gesture_thr) &&
+				(DATA_U[i]>gesture_thr)	){
+
+				u_last=DATA_U[i];
+				d_last=DATA_D[i];
+				l_last=DATA_L[i];
+				r_last=DATA_R[i];
+				break;
+			}
+		}
+	}
+	/* Calculate the first vs. last ratio of up/down and left/right */
+	ud_ratio_first = ((u_first - d_first) * 100) / (u_first + d_first);
+	lr_ratio_first = ((l_first - r_first) * 100) / (l_first + r_first);
+	ud_ratio_last = ((u_last - d_last) * 100) / (u_last + d_last);
+	lr_ratio_last = ((l_last - r_last) * 100) / (l_last + r_last);
+
+	/* Determine the difference between the first and last ratios */
+	ud_delta = ud_ratio_last - ud_ratio_first;
+	lr_delta = lr_ratio_last - lr_ratio_first;
+
+	/* Accumulate the UD and LR delta values */
+    gesture_ud_delta_ += ud_delta;
+    gesture_lr_delta_ += lr_delta;
+
+    /* Determine U/D gesture */
+    if( gesture_ud_delta_ >= GESTURE_SENSITIVITY_1 ) {
+        gesture_ud_count_ = 1;
+    } else if( gesture_ud_delta_ <= -GESTURE_SENSITIVITY_1 ) {
+        gesture_ud_count_ = -1;
+    } else {
+        gesture_ud_count_ = 0;
+    }
+
+    /* Determine L/R gesture */
+    if( gesture_lr_delta_ >= GESTURE_SENSITIVITY_1 ) {
+        gesture_lr_count_ = 1;
+    } else if( gesture_lr_delta_ <= -GESTURE_SENSITIVITY_1 ) {
+        gesture_lr_count_ = -1;
+    } else {
+        gesture_lr_count_ = 0;
+    }
+
+    /* Determine Near/Far gesture */
+    if( (gesture_ud_count_ == 0) && (gesture_lr_count_ == 0) ) {
+        if( (abs(ud_delta) < GESTURE_SENSITIVITY_2) && \
+            (abs(lr_delta) < GESTURE_SENSITIVITY_2) ) {
+
+            if( (ud_delta == 0) && (lr_delta == 0) ) {
+                gesture_near_count_++;
+            } else if( (ud_delta != 0) || (lr_delta != 0) ) {
+                gesture_far_count_++;
+            }
+
+            if( (gesture_near_count_ >= 10) && (gesture_far_count_ >= 2) ) {
+                if( (ud_delta == 0) && (lr_delta == 0) ) {
+                    return near;
+                } else if( (ud_delta != 0) && (lr_delta != 0) ) {
+                    return far;
+                }
+            }
+        }
+    } else {
+        if( (abs(ud_delta) < GESTURE_SENSITIVITY_2) && \
+            (abs(lr_delta) < GESTURE_SENSITIVITY_2) ) {
+
+            if( (ud_delta == 0) && (lr_delta == 0) ) {
+                gesture_near_count_++;
+            }
+
+            if( gesture_near_count_ >= 10 ) {
+                gesture_ud_count_ = 0;
+                gesture_lr_count_ = 0;
+                gesture_ud_delta_ = 0;
+                gesture_lr_delta_ = 0;
+            }
+        }
+    }
+
+
+    /* Determine swipe direction */
+    if( (gesture_ud_count_ == -1) && (gesture_lr_count_ == 0) ) {
+        gesture_state = up;
+    } else if( (gesture_ud_count_ == 1) && (gesture_lr_count_ == 0) ) {
+        gesture_state = down;
+    } else if( (gesture_ud_count_ == 0) && (gesture_lr_count_ == 1) ) {
+        gesture_state = right;
+    } else if( (gesture_ud_count_ == 0) && (gesture_lr_count_ == -1) ) {
+        gesture_state = left;
+    } else if( (gesture_ud_count_ == -1) && (gesture_lr_count_ == 1) ) {
+        if( abs(gesture_ud_delta_) > abs(gesture_lr_delta_) ) {
+            gesture_state = up;
+        } else {
+            gesture_state = right;
+        }
+    } else if( (gesture_ud_count_ == 1) && (gesture_lr_count_ == -1) ) {
+        if( abs(gesture_ud_delta_) > abs(gesture_lr_delta_) ) {
+            gesture_state = down;
+        } else {
+            gesture_state = left;
+        }
+    } else if( (gesture_ud_count_ == -1) && (gesture_lr_count_ == -1) ) {
+        if( abs(gesture_ud_delta_) > abs(gesture_lr_delta_) ) {
+            gesture_state = up;
+        } else {
+            gesture_state = left;
+        }
+    } else if( (gesture_ud_count_ == 1) && (gesture_lr_count_ == 1) ) {
+        if( abs(gesture_ud_delta_) > abs(gesture_lr_delta_) ) {
+            gesture_state = down;
+        } else {
+            gesture_state = right;
+        }
+    } else {
+        return -1;
+    }
+
+    return gesture_state;
+}
+
+void Clock(){
+	HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_9);
+	HAL_Delay(1);
+	uint8_t s[16]={};
+
+	if(gesture()==up)state=setting;
+	HAL_Delay(100);
+	//if(read_APDS9960(0xFC)==255)setRTC(0,49,23,1,29,11,2020);
+	sprintf(s,"%2d:%2d:%2d",get_hour(),get_min(),get_sec());
+	print(s,0);
+
+	char week[4]="  \0";
+	set_week(week,get_day());
+	sprintf(s,"%4d/%2d/%2d(%s)",get_year(),get_month(),get_date(),week);
+	print(s,1);
+
+}
+void Setting(){
+	writedata(0x00,0b00001111);//cursor on
+
+	int setting_sec=get_sec();
+	int setting_min=get_min();
+	int setting_hour=get_hour();
+	int setting_day=get_day();
+	int setting_date=get_date();
+	int setting_month=get_month();
+	int setting_year=get_year();
+	setting_year-=2000;
+
+	char s[16];
+	sprintf(s,"%2d:%2d:%2d Set 0 *",setting_hour,setting_min,setting_sec);
+	print(s,0);
+	char week[4]="  \0";
+	set_week(week,setting_day);
+	sprintf(s,"%4d/%2d/%2d(%s)*",2000+setting_year,setting_month,setting_date,week);
+	print(s,1);
+
+
+	int setting_flag=1;
+	int cursor=0;
+	int colum=0;
+	while(setting_flag){
+		int input=gesture();
+		if(input>non){
+			if(input==left){
+				if(colum==0){
+					if(cursor==3||cursor==6){
+						cursor-=2;
+					}else if(cursor<=0){
+						cursor=15;
+						colum=1;
+					}else{
+						cursor--;
+					}
+				}else if(colum==1){
+					if(cursor==5||cursor==8||cursor==11){
+						cursor-=2;
+					}else if(cursor==15){
+						cursor=11;
+					}else if(cursor<=2){
+						cursor=6;
+						colum=0;
+					}else{
+						cursor--;
+					}
+				}
+			}else if(input==right){
+				if(colum==0){
+					if(cursor==1||cursor==4){
+						cursor+=2;
+					}else if(cursor>=7){
+						cursor=2;
+						colum=1;
+					}else{
+						cursor++;
+					}
+				}else if(colum==1){
+					if(cursor==3||cursor==6||cursor==9){
+						cursor+=2;
+					}else if(cursor==11){
+						cursor=15;
+					}else if(cursor>=15){
+						colum=0;
+						cursor=0;
+					}else{
+						cursor++;
+					}
+				}
+			}else if(input==up){
+				switch(colum){
+				case 0:
+					switch(cursor){
+					case 0:
+						if(setting_hour<20)setting_hour+=10;
+						else setting_hour=setting_hour%10;
+						break;
+					case 1:
+						if(setting_hour<23)setting_hour+=1;
+						else setting_hour=0;
+						break;
+
+					case 3:
+						if(setting_min<50)setting_min+=10;
+						else setting_min=setting_min%10;
+						break;
+					case 4:
+						if(setting_min<59)setting_min+=1;
+						else setting_min=0;
+						break;
+
+					case 6:
+						if(setting_sec<50)setting_sec+=10;
+						else setting_sec=setting_sec%10;
+						break;
+					case 7:
+						if(setting_sec<59)setting_sec+=1;
+						else setting_sec=0;
+						break;
+					default:
+						break;
+
+					}
+					break;
+
+				case 1:
+					switch(cursor){
+					//year
+					case 2:
+						if(setting_year<=90)setting_year+=10;
+						else setting_year=setting_year%10;
+						break;
+					case 3:
+						if(setting_year<99)setting_year+=1;
+						else setting_year=0;
+						break;
+
+					//month
+					case 5:
+						if(setting_month<10)setting_month+=10;
+						else setting_month=setting_month%10;
+						break;
+					case 6:
+						if(setting_month<12)setting_month+=1;
+						else setting_month=1;
+						break;
+
+					//date TODO
+					case 8:
+						if(setting_date<30)setting_date+=10;
+						else setting_date=setting_date%10;
+						break;
+					case 9:
+						if(setting_date<31)setting_date+=1;
+							else setting_date=1;
+							break;
+					//day
+					case 11:
+						if(setting_day<7)setting_day+=1;
+							else setting_day=1;
+							break;
+					//enter
+					case 15:
+						setRTC(setting_sec, setting_min, setting_hour, setting_day, setting_date, setting_month, setting_year);
+						print("setting         ",0);
+						print("clock           ",1);
+						for(int i=0;i<500;i++){
+							gesture();
+							HAL_Delay(1);
+						}
+						state=clock;
+						return;
+						break;
+					default:
+						break;
+					}
+					break;
+
+				}
+			}else if(input==down){
+				switch(colum){
+				case 0:
+					switch(cursor){
+					case 0:
+						if(setting_hour>10)setting_hour-=10;
+						else setting_hour=setting_hour+20;//
+						break;
+					case 1:
+						if(setting_hour>0)setting_hour-=1;
+						else setting_hour=24;
+						break;
+
+					case 3:
+						if(setting_min>10)setting_min-=10;
+						else setting_min=setting_min+50;
+						break;
+					case 4:
+						if(setting_min>0)setting_min-=1;
+						else setting_min=59;
+						break;
+
+					case 6:
+						if(setting_sec>10)setting_sec-=10;
+						else setting_sec=setting_sec+50;
+						break;
+					case 7:
+						if(setting_sec>0)setting_sec-=1;
+						else setting_sec=59;
+						break;
+					default:
+						break;
+
+					}
+					break;
+
+				case 1:
+					switch(cursor){
+					//year
+					case 2:
+						if(setting_year>=10)setting_year-=10;
+						else setting_year=setting_year+90;
+						break;
+					case 3:
+						if(setting_year>0)setting_year-=1;
+						else setting_year=99;
+						break;
+
+					//month
+					case 5:
+						if(setting_month>10)setting_month-=10;
+						else setting_month=setting_month+10;//
+						break;
+					case 6:
+						if(setting_month>1)setting_month-=1;
+						else setting_month=12;
+						break;
+
+					//date TODO
+					case 8:
+						if(setting_date>10)setting_date-=10;
+						else setting_date=setting_date+20;
+						break;
+					case 9:
+						if(setting_date>1)setting_date-=1;
+							else setting_date=30;
+							break;
+					//day
+					case 11:
+						if(setting_day>1)setting_day-=1;
+							else setting_day=7;
+							break;
+					default:
+						break;
+					}
+					break;
+				}
+			}
+
+			char s[16];
+			sprintf(s,"%2d:%2d:%2d Set %d",setting_hour,setting_min,setting_sec,input);
+			print(s,0);
+			char week[4]="  \0";
+			set_week(week,setting_day);
+			sprintf(s,"%4d/%2d/%2d(%s)*",2000+setting_year,setting_month,setting_date,week);
+			print(s,1);
+
+		}
+		if(cursor>=15)cursor=15;
+		if(cursor<=0)cursor=0;
+		writedata(0x00,0x80+0x40*colum+cursor);//set curso position
+		HAL_Delay(500);
+
+	}
+
+	writedata(0x00,0b00001100);//cursor off
+
+}
 /* USER CODE END 0 */
 
 /**
@@ -297,37 +758,20 @@ int main(void)
   MX_GPIO_Init();
   MX_I2C2_Init();
   /* USER CODE BEGIN 2 */
-  uint8_t data;
 
   initdisplay();
-  print("Hello world",0);
+  print("STM32G0 clock   ",0);
+  print("   by mmaakkyyii",1);
 
-  writedata(0x00,0x80+0x40);
-  printkawaii();
-  writedata(0x40,'!');
   HAL_Delay(500);
 
   print("                ",0);
   print("                ",1);
 
-  HAL_Delay(50);
+  initAPDS9960();
+  initRTC();
+  state=clock;
 
-  uint8_t whoami=read_APDS9960(0x92);
-  uint8_t whoami_acc=read_L3GD20H(0x0f);
-
-  write_APDS9960(0x80,0b01000101);
-  write_APDS9960(0x90,0b00110000);
-  write_APDS9960(0xA3,0b01100100);
-
-  write_APDS9960(0xA4,70);
-  write_APDS9960(0xA5,0);
-  write_APDS9960(0xA7,10);
-  write_APDS9960(0xA9,34);
-
-  write_APDS9960(0xAB,0b00000001);
-
-
-  write_RTC(0x00,read_RTC(0x00)&0b01111111);
 /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -337,102 +781,16 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_12);
-	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_9);
-	  HAL_Delay(1);
-	  uint8_t s[16]={};
-
-	  int work=read_APDS9960(0xAE);
-
-	  work = read_APDS9960(0xAE);  //READ GESTUR FIFO LEVEL REGISTER
-	  if(work != 0)           //IF FIFO HAS SOME DATA
-	  {
-	    DATA_U = read_APDS9960(0xFC);
-	    DATA_D = read_APDS9960(0xFD);
-	    DATA_L = read_APDS9960(0xFE);
-	    DATA_R = read_APDS9960(0xFF);
-	    if((DATA_U > NOISE_LEVEL) && (DATA_D > NOISE_LEVEL)&& (DATA_L> NOISE_LEVEL) && (DATA_R > NOISE_LEVEL)) //NOISE CANCEL
-	    {
-	      DATA_SYORI();       //
-	      PHASE_COUNTER++;    //
-	      DISP_FLAG = 1;      //
-	    }
-	    else
-	    {
-	      if(DISP_FLAG)
-	      {
-	        DISP_FLAG = 0;
-	      }
-	      RESET_VARIABLE();
-	    }
+	  switch(state){
+	  case clock:
+	  	  Clock();
+	  	  break;
+	  case setting:
+	  	  Setting();
+	  	  writedata(0x00,0b00001100);//cursor off
+	  	  break;
 	  }
 
-
-	  int sec_addr=read_RTC(0x00);
-	  int min_addr=read_RTC(0x01);
-	  int hour_addr=read_RTC(0x02);
-	  int sec =((sec_addr&0b01111111)>>4)*10+(sec_addr&0b1111);
-	  int min =((min_addr&0b01111111)>>4)*10+(min_addr&0b1111);
-	  int hour=((hour_addr&0b0111111)>>4)*10+(hour_addr&0b1111);
-
-	  //if(read_APDS9960(0xFC)==255)setRTC(0,49,23,1,29,11,2020);
-	  sprintf(s,"%2d:%2d:%2d",hour,min,sec);
-	  print(s,0);
-	  char week[4]="  \0";
-	  switch(read_RTC(0x03)){
-	  case 1:
-		  week[0]='S';
-		  week[1]='u';
-		  week[2]='n';
-		  break;
-	  case 2:
-		  week[0]='M';
-		  week[1]='o';
-		  week[2]='n';
-		  break;
-	  case 3:
-		  week[0]='T';
-		  week[1]='u';
-		  week[2]='e';
-		  break;
-	  case 4:
-		  week[0]='W';
-		  week[1]='e';
-		  week[2]='d';
-		  break;
-	  case 5:
-		  week[0]='T';
-		  week[1]='h';
-		  week[2]='u';
-		  break;
-	  case 6:
-		  week[0]='F';
-		  week[1]='r';
-		  week[2]='i';
-		  break;
-	  case 7:
-		  week[0]='S';
-		  week[1]='a';
-		  week[2]='t';
-		  break;
-	  default:
-		  week[0]=' ';
-		  week[1]=' ';
-		  week[2]=' ';
-
-	  }
-
-	  int date_addr=read_RTC(0x04);
-	  int date=(date_addr>>4)*10+(date_addr&0b1111);
-	  int month_addr=read_RTC(0x05);
-	  int month=(month_addr>>4)*10+(month_addr&0b1111);
-	  int year_addr=read_RTC(0x06);
-	  int year=(year_addr>>4)*10+(year_addr&0b1111)+2000;
-
-	  //sprintf(s,"%d|%3d,%3d,%3d,%3d",SERIAL_STRING,read_APDS9960(0xFC),read_APDS9960(0xFD),read_APDS9960(0xFE),read_APDS9960(0xFF) );
-
-	  sprintf(s,"%4d/%2d/%2d(%s)",year,month,date,week);
-	  print(s,1);
   }
   /* USER CODE END 3 */
 }
